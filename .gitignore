@@ -1,2 +1,6 @@
 *.o
 EMD
+EMD_covgen
+*.gcov
+*.gcda
+*.gcno
