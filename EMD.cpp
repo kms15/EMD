@@ -42,44 +42,69 @@ public:
     }
 };
 
-// Check if the contents of two containers are identical, at least within the
-// given tolerances.  Two values are considered identical if their absolute
-// difference abs(a - b) is less than abs_tolerance or if their relative
-// difference (abs(a/b - 1) where abs(a) > abs(b)) is less than rel_tolerance.
-template <typename C1, typename C2, typename T>
-bool within_tolerance(const C1& c1, const C2& c2, const T& abs_tolerance,
-        const T& rel_tolerance) {
-    // To match the containers must have the same number of elements
-    if (c1.size() != c2.size()) {
-        return false;
-    }
+//
+// Check if two values (or the values in two containers) are identical, at
+// least within the given tolerances.  Two values are considered identical if
+// their absolute difference abs(a - b) is less than abs_tolerance or if their
+// relative difference (abs(a/b - 1) where abs(a) > abs(b)) is less than
+// rel_tolerance.
+//
 
-    // check to see if each of the elements is within tolerance
-    auto i1 = begin(c1);
-    auto i2 = begin(c2);
-    for (; i1 != end(c1); ++i1, ++i2) {
+// generic prototype
+template <typename T1, typename T2, typename Tolerence>
+bool within_tolerance(const T1& t1, const T2& t2,
+        Tolerence abs_tolerance, Tolerence rel_tolerance);
+
+// version for two sets of iterators
+template <typename Iter1, typename Iter2, typename Tolerence>
+bool within_tolerance(Iter1 begin1, Iter1 end1, Iter2 begin2, Iter2 end2,
+    Tolerence abs_tolerance, Tolerence rel_tolerance) {
+
+    auto i1 = begin1;
+    auto i2 = begin2;
+    for (; i1 != end1 && i2 != end2; ++i1, ++i2) {
         if (!within_tolerance(*i1, *i2, abs_tolerance, rel_tolerance))
             return false;
     }
 
-    return true;
+    return i1 == end1 && i2 == end2;
 }
 
-template <>
-bool within_tolerance(const double& d1, const double& d2, const double& abs_tolerance,
-        const double& rel_tolerance) {
+// version for two containers
+template <typename C1, typename C2, typename Tolerence>
+bool within_tolerance(const C1& c1, const C2& c2,
+        Tolerence abs_tolerance, Tolerence rel_tolerance) {
+    return within_tolerance(begin(c1), end(c1), begin(c2), end(c2),
+            abs_tolerance, rel_tolerance);
+}
+
+// version for two scalars (e.g. double, float, or complex)
+template <typename Scalar1, typename Scalar2, typename Tolerance>
+bool scalars_within_tolerance(const Scalar1& s1, const Scalar2& s2,
+        Tolerance abs_tolerance, Tolerance rel_tolerance) {
     assert(abs_tolerance >= 0);
     assert(rel_tolerance >= 0);
 
     // passes if within absolute tolerance
-    if (abs(d1 - d2) <= abs_tolerance) {
+    if (abs(s1 - s2) <= abs_tolerance) {
         return true;
     }
 
     // passes if within relative tolerance
-    auto ratio = (abs(d1) > abs(d2) ? d1/d2 : d2/d1);
+    auto ratio = (abs(s1) > abs(s2) ? s1/s2 : s2/s1);
     return (abs(ratio - 1) <= rel_tolerance);
 }
+
+// explicit specialization for doubles
+template <>
+bool within_tolerance(const double& d1, const double& d2,
+        double abs_tolerance, double rel_tolerance) {
+    return scalars_within_tolerance(d1, d2, abs_tolerance, rel_tolerance);
+}
+
+//
+// The main entry point.  For the moment, this just runs self-tests
+//
 
 int main() {
     using V = safe_vec<double>;
