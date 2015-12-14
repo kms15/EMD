@@ -194,18 +194,18 @@ find_local_maxima(IterX xbegin, IterX xend, IterY ybegin, IterY yend,
 }
 
 // container version of interface
-template <typename XS, typename YS,
-        typename Compare = std::greater<typename YS::value_type>>
-std::pair<std::vector<typename XS::value_type>,
-        std::vector<typename YS::value_type>>
-find_local_maxima(const XS& xs, const YS& ys, Compare compare = Compare{}) {
+template <typename Xs, typename Ys,
+        typename Compare = std::greater<typename Ys::value_type>>
+std::pair<std::vector<typename Xs::value_type>,
+        std::vector<typename Ys::value_type>>
+find_local_maxima(const Xs& xs, const Ys& ys, Compare compare = Compare{}) {
 
     // confirm that the x and y lists are of the same length
     assert(xs.size() == ys.size());
 
     // create some temporary variables to store the results
-    std::vector<typename XS::value_type> extrema_xs;
-    std::vector<typename YS::value_type> extrema_ys;
+    std::vector<typename Xs::value_type> extrema_xs;
+    std::vector<typename Ys::value_type> extrema_ys;
 
     // use the iterator version to find the maxima
     find_local_maxima(begin(xs), end(xs), begin(ys), end(ys),
@@ -216,11 +216,145 @@ find_local_maxima(const XS& xs, const YS& ys, Compare compare = Compare{}) {
 }
 
 
+template <typename Old_Xs, typename Ys, typename New_Xs>
+std::vector<typename Ys::value_type>
+cubic_spline_interpolate(const Old_Xs& old_xs, const Ys& old_ys,
+        const New_Xs& new_xs) {
+
+    using Y_Val = typename Ys::value_type;
+    std::vector<Y_Val> new_ys {};
+    new_ys.reserve(new_xs.size());
+
+    assert(old_xs.size() > 0);
+
+    if (old_xs.size() == 1) {
+        new_ys.assign(new_xs.size(), old_ys.front());
+    } else {
+        std::vector<Y_Val> d2ys {}; // second derivative of old_ys
+        d2ys.reserve(new_xs.size());
+        auto dx_begin = old_xs[1] - old_xs[0];
+        auto dx_end = old_xs.back() - old_xs[old_xs.size() - 2];
+        auto dy_begin = old_ys[1] - old_ys[0];
+        auto dy_end = old_ys.back() - old_ys[old_ys.size() - 2];
+
+        // assume the "natural" condition on the left side
+        // (i.e. second derivative is 0)
+        d2ys.push_back(0);
+
+        if (old_xs.size() == 3) {
+            // special case when the second data point is also the second to
+            // last data point.
+            d2ys.push_back(
+                3*(dy_end/dx_end - dy_begin/dx_begin)/(dx_end + dx_begin)
+            );
+        } else if (old_xs.size() > 3) {
+            // we need to solve a tridiagonal system to find the y'' values
+            std::vector<Y_Val> diag {};
+            std::vector<Y_Val> off_diag {};
+            std::vector<Y_Val> rhs {};
+            diag.reserve(old_xs.size() - 2);
+            off_diag.reserve(old_xs.size() - 3);
+            rhs.reserve(old_xs.size() - 2);
+
+            // calculate the diagonal, off-diagonal, and rhs of the
+            // linear system
+            for (int i = 1; i < old_xs.size() - 1; ++i) {
+                auto dx_m = old_xs[i] - old_xs[i-1];
+                auto dx_p = old_xs[i+1] - old_xs[i];
+                auto dy_m = old_ys[i] - old_ys[i-1];
+                auto dy_p = old_ys[i+1] - old_ys[i];
+
+                diag.push_back((dx_p + dx_m)/3);
+                rhs.push_back(dy_p/dx_p - dy_m/dx_m);
+
+                // off-diagonal is one shorter than the diagonal and rhs
+                if (i < old_xs.size() - 2) {
+                    off_diag.push_back(dx_p/6);
+                }
+            }
+
+            // do the forward substitution pass
+            for (int i = 1; i < rhs.size(); ++i) {
+                auto q = off_diag[i-1]/diag[i-1];
+                diag[i] -= q*off_diag[i-1];
+                rhs[i] -= q*rhs[i-1];
+            }
+
+            // do the backwards substitution
+            for (int i = rhs.size() - 2; i >= 0; --i) {
+                auto q = off_diag[i]/diag[i+1];
+                rhs[i] -= q*rhs[i+1];
+            }
+
+            // store the d2ys
+            for (int i = 0; i < rhs.size(); ++i) {
+                d2ys.push_back(rhs[i]/diag[i]);
+            }
+        }
+
+        // assume the "natural" condition on the right side
+        // (i.e. second derivative is 0)
+        d2ys.push_back(0);
+
+        // we'll walk several iterators through the lists
+        auto i_new_x = new_xs.begin();
+        auto i_old_x = old_xs.begin();
+        auto i_old_y = old_ys.begin();
+        auto i_d2y = d2ys.begin();
+
+        // first handle the extrapolated points at the beginning
+        while (i_new_x != new_xs.end() && *i_new_x <= *i_old_x) {
+            auto slope_begin = dy_begin/dx_begin -
+                dx_begin*(d2ys.front()/3 + d2ys[1]/6);
+            new_ys.push_back(
+                old_ys.front() + slope_begin * (*i_new_x - old_xs.front())
+            );
+            ++i_new_x;
+        }
+        // next handle the interpolated points in the middle
+        while (i_new_x != new_xs.end()) {
+            // find the smallest old x that is greater than the new x
+            while (i_old_x != old_xs.end() && *i_old_x <= *i_new_x) {
+                ++i_old_x;
+                ++i_old_y;
+                ++i_d2y;
+            }
+            if (i_old_x == old_xs.end()) {
+                break; // we're done interpolating (and need to extrapolate)
+            }
+
+            auto dx = *i_old_x - *(i_old_x - 1);
+            auto u = (*i_old_x - *i_new_x) / dx;
+            auto v = 1 - u;
+
+            new_ys.push_back(
+                *(i_old_y-1)*u + *i_old_y*v +
+                    *(i_d2y - 1) * (u*u*u - u)*dx*dx/6 +
+                    *i_d2y * (v*v*v - v)*dx*dx/6
+            );
+            ++i_new_x;
+        }
+        // finally, handle the extrapolated points at the end
+        while (i_new_x != new_xs.end()) {
+            auto slope_end = dy_end/dx_end +
+                dx_end*(d2ys[d2ys.size() - 2]/6 + d2ys.back()/3);
+            new_ys.push_back(
+                old_ys.back() + slope_end * (*i_new_x - old_xs.back())
+            );
+            ++i_new_x;
+        }
+    }
+
+    return std::move(new_ys);
+}
+
+
 //
 // The main entry point.  For the moment, this just runs self-tests
 //
 
 int main() {
+    // define some abbreviations we'll use below
     using V = std::vector<double>;
     using PV = std::pair<V,V>;
 
@@ -318,6 +452,35 @@ int main() {
             find_local_maxima(V{1, 2, 3, 4, 5, 6}, V{3, 2, 4, 1, 6, 2},
                 std::less<double>{}),
             PV{{2, 4}, {2, 1}}, 0., 0.));
+    }
+    {
+        std::cout << "testing cubic_spline_interpolate...\n";
+
+        // with one original data point, should assume a constant function
+        assert(within_tolerance(
+            cubic_spline_interpolate(V{1.1}, V{2.2}, V{0.0, 1.1, 3.3, 4.4}),
+            V{2.2, 2.2, 2.2, 2.2}, 0., 0.));
+        // with two original data points, should assume a linear function
+        assert(within_tolerance(
+            cubic_spline_interpolate(V{0.1, 1.2}, V{2.3, 3.5},
+                V{0.0, 0.1, 0.3, 1.2, 1.5}),
+            V{2.190909, 2.300000, 2.518182, 3.500000, 3.827273},
+            1e-6, 0.));
+        // should use cubic splines for 3 or more datapoints
+        // (test data from R "spline" function with method="natural")
+        assert(within_tolerance(
+            cubic_spline_interpolate(V{0.1, 1.2, 3.3}, V{2.3, 4.5, 1.2},
+                V{0.0, 0.1, 0.3, 1.2, 1.5, 3.3, 4.2}),
+            V{2.038616, 2.300000, 2.818709, 4.500000, 4.588202, 1.200000,
+                -1.268973},
+            1e-6, 0.));
+        assert(within_tolerance(
+            cubic_spline_interpolate(
+                V{0.1, 1.2, 3.3, 3.7, 4.3}, V{2.3, 4.5, 1.2, 2.4, 2.8},
+                V{1.1, 2.1, 3.1, 4.1}
+            ),
+            V{4.4984771, 2.5856026, 0.8846014, 2.8224232},
+            1e-7, 0.));
     }
 
     return 0;
