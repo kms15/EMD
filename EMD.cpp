@@ -216,6 +216,12 @@ find_local_maxima(const Xs& xs, const Ys& ys, Compare compare = Compare{}) {
 }
 
 
+//
+// Calculate a cubic spline through the given data points using the "natural"
+// approach of forcing the second derivative to be zero at the end points.
+// Returns the value of this spline at the given new x-values.
+//
+
 template <typename Old_Xs, typename Ys, typename New_Xs>
 std::vector<typename Ys::value_type>
 cubic_spline_interpolate(const Old_Xs& old_xs, const Ys& old_ys,
@@ -346,6 +352,36 @@ cubic_spline_interpolate(const Old_Xs& old_xs, const Ys& old_ys,
     }
 
     return std::move(new_ys);
+}
+
+
+//
+// Calculate the difference between two sifting passes.  This is intended to
+// match what is described in Huang et al 1998 equation 5.5.  It's not clear
+// that equation 5.5 is really what the author's intended, however.  The
+// value is described as a "standard deviation" but equation 5.5 lacks the
+// normal scaling for length and square root of a typical standard deviation.
+// Without the length scaling the expected value will grow without bound as
+// the length becomes large, which doesn't really match with the author's
+// suggestion of 0.2 to 0.3 as a threshold for a small difference
+// (independent of length).  Thus I'm assuming that the right hand side of
+// equation 5.5 should be divided by T and raised to the 1/2 power, as is
+// typical for a "standard deviation".
+//
+template <typename T1, typename T2>
+typename T1::value_type
+sifting_difference(const T1& old_vals, const T2& new_vals) {
+    typename T1::value_type sum = 0;
+
+    assert(old_vals.size() == new_vals.size());
+    auto i1 = old_vals.begin();
+    auto i2 = new_vals.begin();
+
+    for (; i1 != old_vals.end(); ++i1, ++i2) {
+        sum += (*i1 - *i2) * (*i1 - *i2) / (*i1 * *i1);
+    }
+
+    return sqrt(sum / old_vals.size());
 }
 
 
@@ -481,6 +517,14 @@ int main() {
             ),
             V{4.4984771, 2.5856026, 0.8846014, 2.8224232},
             1e-7, 0.));
+    }
+    {
+        std::cout << "testing sifting_difference...\n";
+
+        // Note: best guess on what the author meant - see comment in function
+        assert(within_tolerance(
+            sifting_difference(V{0.1, 0.3, -0.2}, V{0.11, -0.1, -0.21}),
+             0.7725019, 1e-7, 0.));
     }
 
     return 0;
