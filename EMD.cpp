@@ -356,6 +356,32 @@ cubic_spline_interpolate(const Old_Xs& old_xs, const Ys& old_ys,
 
 
 //
+// Perform a single sifting pass of the empiric mode decomposition as
+// described by Huang et al 1998.  This is performed by fitting a cubic
+// spline through the local minima and maxima, then subtracting the mean of
+// these two cubic splines from the original data.
+//
+template <typename Xs, typename Ys>
+std::vector<typename Ys::value_type>
+sift(const Xs& xs, const Ys& ys) {
+    std::vector<typename Ys::value_type> result;
+    result.reserve(ys.size());
+
+    auto maxima = find_local_maxima(xs, ys);
+    auto minima = find_local_maxima(xs, ys, std::less<typename Ys::value_type>{});
+    auto upper_envelope = cubic_spline_interpolate(maxima.first,
+        maxima.second, xs);
+    auto lower_envelope = cubic_spline_interpolate(minima.first,
+        minima.second, xs);
+
+    for (int i = 0; i < upper_envelope.size(); ++i) {
+        result.push_back(ys[i] - (upper_envelope[i] + lower_envelope[i])/2);
+    }
+
+    return std::move(result);
+}
+
+//
 // Calculate the difference between two sifting passes.  This is intended to
 // match what is described in Huang et al 1998 equation 5.5.  It's not clear
 // that equation 5.5 is really what the author's intended, however.  The
@@ -517,6 +543,18 @@ int main() {
             ),
             V{4.4984771, 2.5856026, 0.8846014, 2.8224232},
             1e-7, 0.));
+    }
+    {
+        std::cout << "testing sift...\n";
+
+        assert(within_tolerance(
+            sift(V{1.2, 2.1, 3.4, 3.7, 4.2,  5.0, 6.0,  6.5, 7.2, 8.0},
+                V{1.2, 0.8, 3.4, 3.5, 2.7, -0.1, 0.3, -0.5, 2.1, 1.4}),
+            V{ -4.022762880, -3.223043478, 1.108004434,  1.606285807,
+                1.457152560, -0.475425331, 0.334987809, -0.660552536,
+                1.390727534, -0.003844725},
+            1e-9, 0.
+        ));
     }
     {
         std::cout << "testing sifting_difference...\n";
