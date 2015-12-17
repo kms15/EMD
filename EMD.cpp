@@ -361,6 +361,9 @@ cubic_spline_interpolate(const Old_Xs& old_xs, const Ys& old_ys,
 // spline through the local minima and maxima, then subtracting the mean of
 // these two cubic splines from the original data.
 //
+// If the data contain no local maxima or they contain no local minima, the
+// sifting process is aborted and an empty list is returned.
+//
 template <typename Xs, typename Ys>
 std::vector<typename Ys::value_type>
 sift(const Xs& xs, const Ys& ys) {
@@ -369,6 +372,12 @@ sift(const Xs& xs, const Ys& ys) {
 
     auto maxima = find_local_maxima(xs, ys);
     auto minima = find_local_maxima(xs, ys, std::less<typename Ys::value_type>{});
+
+    if (maxima.first.size() == 0 || minima.first.size() == 0) {
+        // no extrema - can't sift.
+        return result;
+    }
+
     auto upper_envelope = cubic_spline_interpolate(maxima.first,
         maxima.second, xs);
     auto lower_envelope = cubic_spline_interpolate(minima.first,
@@ -408,6 +417,51 @@ sifting_difference(const T1& old_vals, const T2& new_vals) {
     }
 
     return sqrt(sum / old_vals.size());
+}
+
+
+//
+// Calculate the empirical mode decomposition of a time series.
+//
+template <typename Xs, typename Ys>
+std::vector<std::vector<typename Ys::value_type>>
+empirical_mode_decomposition(const Xs& xs, const Ys& ys) {
+    using Y_Val = typename Ys::value_type;
+    using Imf = std::vector<Y_Val>;
+
+    Imf residual;
+    std::vector<Imf> result;
+
+    // until we start subtracting, the residual is the original data
+    residual.reserve(ys.size());
+    residual.assign(begin(ys), end(ys));
+
+    while (true) {
+        auto sifted = sift(xs, residual);
+
+        // stop when we can't sift any more
+        if (sifted.size() == 0) {
+            break;
+        }
+
+        // iterate the sifting process until we reach a stopping condition
+        Imf imf {residual};
+        while (sifted.size() > 0 && sifting_difference(imf, sifted) > 0.2) {
+            auto last_imf = std::move(imf);
+            imf = std::move(sifted);
+            sifted = sift(xs, last_imf);
+        }
+
+        // subtract out the imf from the residual
+        for (size_t i = 0; i < residual.size(); ++i) {
+            residual[i] -= imf[i];
+        }
+
+        result.push_back(imf);
+    }
+
+    result.push_back(residual);
+    return std::move(result);
 }
 
 
@@ -555,6 +609,11 @@ int main() {
                 1.390727534, -0.003844725},
             1e-9, 0.
         ));
+
+        // should return false if monotonic
+        assert(within_tolerance(
+            sift(V{1.0, 2.1, 3.4, 5.5}, V{2.0, 2.1, 3.0, 3.0}),
+            V{}, 0., 0.));
     }
     {
         std::cout << "testing sifting_difference...\n";
@@ -563,6 +622,32 @@ int main() {
         assert(within_tolerance(
             sifting_difference(V{0.1, 0.3, -0.2}, V{0.11, -0.1, -0.21}),
              0.7725019, 1e-7, 0.));
+    }
+    {
+        std::cout << "testing empirical_mode_decomposition...\n";
+        auto xs = V{1.2, 2.1, 3.4, 3.7, 4.2,  5.0, 6.0,  6.5, 7.2, 8.0};
+        auto ys = V{1.2, 0.8, 3.4, 3.5, 2.7, -0.1, 0.3, -0.5, 2.1, 1.4};
+        auto imfs = empirical_mode_decomposition(xs, ys);
+
+        // should be at least one IMF
+        assert(imfs.size() > 0);
+
+        // sum of all IMFs should be the original signal
+        std::vector<double> sum(ys.size());
+        for (auto imf : imfs) {
+            assert(imf.size() == ys.size());
+
+            for (size_t i = 0; i < imf.size(); ++i) {
+                sum[i] += imf[i];
+            }
+        }
+        assert(within_tolerance(sum, ys, 1e-14, 0.));
+
+        // residual should be monotonic or within tolerance
+        auto residual = imfs.back();
+        assert(find_local_maxima(xs, residual).first.size() == 0 ||
+            find_local_maxima(xs, residual, std::less<double>{}).first.size()
+                == 0);
     }
 
     return 0;
