@@ -470,7 +470,7 @@ empirical_mode_decomposition(const Xs& xs, const Ys& ys) {
 // reverses the bits in an n bit word
 //
 template <typename T>
-T reverse_n_bits(T val, int word_length) {
+T reverse_n_bits(T val, unsigned word_length) {
     using U = typename std::make_unsigned<T>::type;
     U u = static_cast<U>(val);
 
@@ -519,6 +519,30 @@ T reverse_n_bits(T val, int word_length) {
         ((u & static_cast<U>(0x00000000FFFFFFFFULL)) << 32);
 
     return u >> (64 - word_length);
+}
+
+
+//
+// creates a copy of the list where the elements have been shuffled to be
+// at an index equal to their original index after it has been bit-reversed.
+// The original data is zero-padded as needed to make its length a power
+// of 2.
+//
+template <typename C, typename T=typename C::value_type>
+std::vector<T>
+bit_reverse_copy(const C& c) {
+    unsigned num_address_bits = 0;
+    while ((1 << num_address_bits) < c.size()) {
+        ++num_address_bits;
+    }
+
+    std::vector<T> result(1 << num_address_bits);
+
+    for (size_t i = 0; i < c.size(); ++i) {
+        result[reverse_n_bits(i, num_address_bits)] = c[i];
+    }
+
+    return std::move(result);
 }
 
 //
@@ -706,7 +730,6 @@ int main() {
                 == 0);
     }
     {
-        // reverse bits should reverse the order of the bits in a 64 bit word
         std::cout << "testing reverse_64_bits...\n";
         assert(reverse_n_bits(0x8001200400106072ULL, 64) ==
                 0x4E06080020048001ULL);
@@ -717,6 +740,16 @@ int main() {
         assert(reverse_n_bits(0xBADCAFE,28) == 0x7F53B5D);
         assert(reverse_n_bits(0xADCAFE,24) == 0x7F53B5);
         assert(reverse_n_bits(static_cast<short>(0xBAD),12) == 0xB5D);
+    }
+    {
+        std::cout << "testing bit_reverse_copy...\n";
+        assert(within_tolerance(
+            bit_reverse_copy(V{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8}),
+            V{0.1, 0.5, 0.3, 0.7, 0.2, 0.6, 0.4, 0.8}, 0., 0.));
+        // should 0 pad as needed
+        assert(within_tolerance(
+            bit_reverse_copy(V{0.1, 0.2, 0.3, 0.4, 0.5, 0.6}),
+            V{0.1, 0.5, 0.3, 0.0, 0.2, 0.6, 0.4, 0.0}, 0., 0.));
     }
 
     return 0;
