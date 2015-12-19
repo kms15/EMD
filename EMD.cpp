@@ -17,12 +17,14 @@
 //    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <iostream>
+#include <iomanip>
 #include <vector>
 #include <limits>
 #include <cassert>
 #include <cmath>
 #include <sstream>
 #include <functional>
+#include <type_traits>
 
 using std::begin;
 using std::end;
@@ -464,6 +466,60 @@ empirical_mode_decomposition(const Xs& xs, const Ys& ys) {
     return std::move(result);
 }
 
+//
+// reverses the bits in an n bit word
+//
+template <typename T>
+T reverse_n_bits(T val, int word_length) {
+    using U = typename std::make_unsigned<T>::type;
+    U u = static_cast<U>(val);
+
+    // proposed word length should fit the type being used
+    // (note: the size of the type must fit the next largest power of 2 bits)
+    assert((sizeof(u) >= 8 && word_length <= 64) ||
+            (sizeof(u) >= 4 && word_length <= 32) ||
+            (sizeof(u) >= 2 && word_length <= 16) ||
+            word_length <= 8);
+
+    // we don'u support word lengths over 64 bits at the moment
+    assert(word_length <= 64);
+
+    // first swap adjacent bits...
+    u = ((u & static_cast<U>(0xAAAAAAAAAAAAAAAAULL)) >> 1) +
+        ((u & static_cast<U>(0x5555555555555555ULL)) << 1);
+    // ...then adjacent pairs of bits...
+    u = ((u & static_cast<U>(0xCCCCCCCCCCCCCCCCULL)) >> 2) +
+        ((u & static_cast<U>(0x3333333333333333ULL)) << 2);
+    // ...then adjacent nibbles...
+    u = ((u & static_cast<U>(0xF0F0F0F0F0F0F0F0ULL)) >> 4) +
+        ((u & static_cast<U>(0x0F0F0F0F0F0F0F0FULL)) << 4);
+
+    if (sizeof(u) == 1) {
+        return u >> (8 - word_length);
+    }
+
+    // ...then adjacent bytes...
+    u = ((u & static_cast<U>(0xFF00FF00FF00FF00ULL)) >> 8) +
+        ((u & static_cast<U>(0x00FF00FF00FF00FFULL)) << 8);
+
+    if (sizeof(u) == 2) {
+        return u >> (16 - word_length);
+    }
+
+    // ...then adjacent words...
+    u = ((u & static_cast<U>(0xFFFF0000FFFF0000ULL)) >> 16) +
+        ((u & static_cast<U>(0x0000FFFF0000FFFFULL)) << 16);
+
+    if (sizeof(u) == 4) {
+        return u >> (32 - word_length);
+    }
+
+    // ...then adjacent dwords...
+    u = ((u & static_cast<U>(0xFFFFFFFF00000000ULL)) >> 32) +
+        ((u & static_cast<U>(0x00000000FFFFFFFFULL)) << 32);
+
+    return u >> (64 - word_length);
+}
 
 //
 // The main entry point.  For the moment, this just runs self-tests
@@ -648,6 +704,19 @@ int main() {
         assert(find_local_maxima(xs, residual).first.size() == 0 ||
             find_local_maxima(xs, residual, std::less<double>{}).first.size()
                 == 0);
+    }
+    {
+        // reverse bits should reverse the order of the bits in a 64 bit word
+        std::cout << "testing reverse_64_bits...\n";
+        assert(reverse_n_bits(0x8001200400106072ULL, 64) ==
+                0x4E06080020048001ULL);
+        assert(reverse_n_bits(0x800120040010607ULL, 60) ==
+                0xE06080020048001ULL);
+        assert(reverse_n_bits('\x35',6) == '\x2b');
+        assert(reverse_n_bits(0xABADCAFE,32) == 0x7F53B5D5);
+        assert(reverse_n_bits(0xBADCAFE,28) == 0x7F53B5D);
+        assert(reverse_n_bits(0xADCAFE,24) == 0x7F53B5);
+        assert(reverse_n_bits(static_cast<short>(0xBAD),12) == 0xB5D);
     }
 
     return 0;
