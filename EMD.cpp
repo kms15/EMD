@@ -632,22 +632,44 @@ ifft(const C& c) {
 // Calculate the analytic representation of a time series (by adding i times
 // the Hilbert transform of the time series).
 //
-template <typename C,
-         typename T=typename make_complex<typename C::value_type>::type>
+template <typename Ys,
+         typename T=typename make_complex<typename Ys::value_type>::type>
 std::vector<T>
-analytic_representation(const C& c) {
-    auto ft = fft(c);
+analytic_representation(const Ys& ys) {
+    auto zs = fft(ys);
 
     // multiply the positive frequencies by two and zero out the negative
     // frequencies (leaving the boundary frequencies at 1).
-    for (size_t i = 1; i < ft.size()/2; ++i) {
-        ft[i] *= 2;
+    for (size_t i = 1; i < zs.size()/2; ++i) {
+        zs[i] *= 2;
     }
-    for (size_t i = ft.size()/2 + 1; i < ft.size(); ++i) {
-        ft[i] = 0;
+    for (size_t i = zs.size()/2 + 1; i < zs.size(); ++i) {
+        zs[i] = 0;
     }
 
-    return ifft(ft);
+    return ifft(zs);
+}
+
+
+//
+// Calculate the derivative of a time series using finite differences.  The
+// forward difference is used for the first data point, the backwards
+// difference for the last data point, and the central difference for all
+// other data points.
+//
+template <typename Ys, typename T=typename Ys::value_type>
+std::vector<T>
+derivative(const Ys& ys) {
+    std::vector<T> result;
+    result.reserve(ys.size());
+
+    result.push_back(ys[1] - ys[0]);
+    for (size_t i = 1; i < ys.size() - 1; ++ i) {
+        result.push_back((ys[i + 1] - ys[i - 1])/2);
+    }
+    result.push_back(ys[ys.size() - 1] - ys[ys.size() - 2]);
+
+    return std::move(result);
 }
 
 
@@ -894,9 +916,19 @@ int main() {
         const double pi = 2 * std::atan2(0.,1.);
         for (int k = 0; k < 1024; ++k) {
             input.push_back(std::cos(2*pi*k/128));
-            expected.push_back(C{std::cos(2*pi*k/128), std::sin(2*pi*k/128)});
+            expected.push_back(
+                C{std::cos(2*pi*k/128), std::sin(2*pi*k/128)});
         }
-        assert(within_tolerance(analytic_representation(input), expected, 1e-15, 0.));
+        assert(within_tolerance(analytic_representation(input), expected,
+            1e-15, 0.));
+    }
+    {
+        std::cout << "testing derivative...\n";
+        assert(within_tolerance(derivative(
+                V{1.2, 0.8, 3.4, 3.5, 2.7, -0.1, 0.3, -0.5, 2.1, 1.4}
+            ),
+            V{-0.4, 1.1, 1.35, -0.35, -1.8, -1.2, -0.2, 0.9, 0.95, -0.7},
+            1e-15, 0.));
     }
 
     return 0;
