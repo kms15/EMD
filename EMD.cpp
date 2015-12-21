@@ -636,18 +636,18 @@ template <typename Ys,
          typename T=typename make_complex<typename Ys::value_type>::type>
 std::vector<T>
 analytic_representation(const Ys& ys) {
-    auto zs = fft(ys);
+    auto ws = fft(ys);
 
     // multiply the positive frequencies by two and zero out the negative
     // frequencies (leaving the boundary frequencies at 1).
-    for (size_t i = 1; i < zs.size()/2; ++i) {
-        zs[i] *= 2;
+    for (size_t i = 1; i < ws.size()/2; ++i) {
+        ws[i] *= 2;
     }
-    for (size_t i = zs.size()/2 + 1; i < zs.size(); ++i) {
-        zs[i] = 0;
+    for (size_t i = ws.size()/2 + 1; i < ws.size(); ++i) {
+        ws[i] = 0;
     }
 
-    return ifft(zs);
+    return ifft(ws);
 }
 
 
@@ -655,23 +655,85 @@ analytic_representation(const Ys& ys) {
 // Calculate the derivative of a time series using finite differences.  The
 // forward difference is used for the first data point, the backwards
 // difference for the last data point, and the central difference for all
-// other data points.
+// other data points.  An optional difference function can be supplied to
+// calculate the difference between two adjacent values; this can be
+// important to specify in cases such as angles, where the difference between
+// 3/4 pi radians and -3/4 pi radians may be 1/2 pi radians (and not -6/4 pi
+// radians).
 //
-template <typename Ys, typename T=typename Ys::value_type>
+template <typename Ys, typename T=typename Ys::value_type,
+         typename Diff = std::minus<T>>
 std::vector<T>
-derivative(const Ys& ys) {
+derivative(const Ys& ys, Diff diff = Diff{}) {
     std::vector<T> result;
     result.reserve(ys.size());
 
-    result.push_back(ys[1] - ys[0]);
+    result.push_back(diff(ys[1], ys[0]));
     for (size_t i = 1; i < ys.size() - 1; ++ i) {
-        result.push_back((ys[i + 1] - ys[i - 1])/2);
+        // note: the ys[i] terms will cancel out with the standard definition
+        // of diff, but are important for some definitions of diff (e.g. when
+        // calculating angular velocities for a sequence like
+        // (pi/3, pi, -pi/3).)
+        result.push_back((diff(ys[i + 1],ys[i]) + diff(ys[i], ys[i - 1]))/2);
     }
-    result.push_back(ys[ys.size() - 1] - ys[ys.size() - 2]);
+    result.push_back(diff(ys[ys.size() - 1], ys[ys.size() - 2]));
 
     return std::move(result);
 }
 
+
+//
+// calculate the closest difference between two values on a cyclic system,
+// e.g. angles on a circle or modulo arithmetic.  Note that this is sometimes
+// the conventional difference, e.g. the difference between 1/4 pi radians
+// and -1/4 pi radians is 1/2 pi radians, and sometimes not the conventional
+// difference, e.g. the difference between 3/4 pi radians and -3/4 pi radians
+// is also 1/2 pi radians.
+//
+template <class T>
+std::function<T (T, T)>
+cyclic_difference(T cycle_size){
+    return [cycle_size](T a, T b) {
+        T t = a - b;
+        if (t > cycle_size/2)
+            return t - cycle_size;
+        else if (t < -cycle_size/2)
+            return t + cycle_size;
+        else
+            return t;
+    };
+}
+
+
+//
+// Calculate the instantaneous frequency and amplitude of a signal using the
+// Hilbert transform.  Note that this is only well defined for signals that
+// have a relatively low bandwidth at a given moment in time.
+//
+template <typename Ys, typename T=typename Ys::value_type>
+std::pair<std::vector<T>, std::vector<T>>
+instantaneous_frequency_and_amplitude(const Ys& ys) {
+    const T pi = 2*std::arg(std::complex<T>(0., 1.));
+    auto zs = analytic_representation(ys);
+
+    std::vector<T> angle;
+    std::transform(zs.begin(), zs.end(), std::back_inserter(angle),
+        [](std::complex<double> z) { return std::arg(z); });
+
+    std::vector<T> amplitude;
+    std::transform(zs.begin(), zs.end(), std::back_inserter(amplitude),
+        [](std::complex<double> z) { return std::abs(z); });
+
+    // calculate the frequency from the angular velocity
+    auto frequency = derivative(angle, cyclic_difference(2*pi));
+    for (auto& f : frequency) {
+        f /= 2*pi;
+    }
+
+    return std::pair<std::vector<T>, std::vector<T>>{
+        std::move(frequency), std::move(amplitude)
+    };
+}
 
 //
 // The main entry point.  For the moment, this just runs self-tests
@@ -923,12 +985,104 @@ int main() {
             1e-13, 0.));
     }
     {
+        std::cout << "testing cyclic difference...\n";
+        // should calculate the normal difference when it's less than half
+        // the cycle size...
+        assert(within_tolerance(cyclic_difference(5.)(-1., 1.499999),
+            -2.499999, 1e-15, 0.));
+        assert(within_tolerance(cyclic_difference(5.)(1., -1.499999),
+            2.499999, 1e-15, 0.));
+        // should calculate the wraparound difference when it's greater than
+        // half of the cycle size
+        assert(within_tolerance(cyclic_difference(5.)(-1., 1.51),
+            2.49, 1e-15, 0.));
+        assert(within_tolerance(cyclic_difference(5.)(1., -1.51),
+            -2.49, 1e-15, 0.));
+    }
+    {
         std::cout << "testing derivative...\n";
+        // should do forward, central, and backwards differences where
+        // appropriate.
         assert(within_tolerance(derivative(
                 V{1.2, 0.8, 3.4, 3.5, 2.7, -0.1, 0.3, -0.5, 2.1, 1.4}
             ),
             V{-0.4, 1.1, 1.35, -0.35, -1.8, -1.2, -0.2, 0.9, 0.95, -0.7},
             1e-15, 0.));
+        // should handle branch cuts if a difference function is passed to it
+        assert(within_tolerance(derivative(V{0.9, 0.1, 0.2, 0.8, 0.1},
+                cyclic_difference(1.)),
+            V{0.2, 0.15, -0.15, -0.05, 0.3},
+            1e-15, 0.));
+    }
+    {
+        std::cout << "testing instantaneous_frequency_and_amplitude...\n";
+        const double pi = 2 * std::atan2(1.,0.);
+        // should correctly calculate constant frequency and amplitude for a
+        // sine wave.
+        {
+            V input;
+            V expected_frequency(1024, 1./128);
+            V expected_amplitude(1024, 2.5);
+
+            for (int k = 0; k < 1024; ++k) {
+                input.push_back(2.5*std::cos(2*pi*k/128));
+            }
+            auto result = instantaneous_frequency_and_amplitude(input);
+            assert(within_tolerance(result.first, expected_frequency,
+                1e-13, 0.));
+            assert(within_tolerance(result.second, expected_amplitude,
+                1e-13, 0.));
+        }
+        // should capture an exponential decay in amplitude, at least away
+        // from the edges.
+        {
+            V input;
+            V expected_center_frequency(512, 1./128);
+            V expected_center_amplitude;
+
+            for (int k = 0; k < 1024; ++k) {
+                if (k >= 256 && k < 768) {
+                    expected_center_amplitude.push_back(exp(-k/1024.));
+                }
+                input.push_back(exp(-k/1024.)*std::cos(2*pi*k/128));
+            }
+            auto result = instantaneous_frequency_and_amplitude(input);
+
+            V center_frequency;
+            center_frequency.assign(result.first.begin() + 256, result.first.begin() + 768);
+            assert(within_tolerance(center_frequency, expected_center_frequency,
+                1e-4, 0.));
+
+            V center_amplitude;
+            center_amplitude.assign(result.second.begin() + 256, result.second.begin() + 768);
+            assert(within_tolerance(center_amplitude, expected_center_amplitude,
+                2.5e-3, 0.));
+        }
+        // should capture a gradual frequency change, at least away
+        // from the edges.
+        {
+            V input;
+            V expected_center_frequency;
+            V expected_center_amplitude(512, 2.5);
+
+            for (int k = 0; k < 1024; ++k) {
+                if (k >= 256 && k < 768) {
+                    expected_center_frequency.push_back((k/1024. + 1)/32. + k/1024./32);
+                }
+                input.push_back(2.5*std::cos(2*pi*k*(k/1024. + 1)/32.));
+            }
+            auto result = instantaneous_frequency_and_amplitude(input);
+
+            V center_frequency;
+            center_frequency.assign(result.first.begin() + 256, result.first.begin() + 768);
+            assert(within_tolerance(center_frequency, expected_center_frequency,
+                1e-4, 0.));
+
+            V center_amplitude;
+            center_amplitude.assign(result.second.begin() + 256, result.second.begin() + 768);
+            assert(within_tolerance(center_amplitude, expected_center_amplitude,
+                1e-3, 0.));
+        }
     }
 
     return 0;
