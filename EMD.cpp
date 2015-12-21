@@ -457,9 +457,8 @@ empirical_mode_decomposition(const Xs& xs, const Ys& ys) {
         // iterate the sifting process until we reach a stopping condition
         Imf imf {residual};
         while (sifted.size() > 0 && sifting_difference(imf, sifted) > 0.2) {
-            auto last_imf = std::move(imf);
             imf = std::move(sifted);
-            sifted = sift(xs, last_imf);
+            sifted = sift(xs, imf);
         }
 
         // subtract out the imf from the residual
@@ -808,6 +807,15 @@ int main() {
             }
         }
         assert(within_tolerance(sum, ys, 1e-14, 0.));
+
+        // all IMFs should be at the point where further sifting will not
+        // improve them.
+        for (auto imf : imfs) {
+            auto sifted = sift(xs, imf);
+            std::cout << imf << "\n";
+            assert(sifted.size() == 0 ||
+                sifting_difference(imf, sifted) <= 0.2);
+        }
 
         // residual should be monotonic or within tolerance
         auto residual = imfs.back();
