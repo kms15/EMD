@@ -25,6 +25,7 @@
 #include <sstream>
 #include <functional>
 #include <type_traits>
+#include <complex>
 
 using std::begin;
 using std::end;
@@ -112,7 +113,7 @@ bool scalars_within_tolerance(const Scalar1& s1, const Scalar2& s2,
 
     // passes if within relative tolerance
     auto ratio = (abs(s1) > abs(s2) ? s1/s2 : s2/s1);
-    return (abs(ratio - 1) <= rel_tolerance);
+    return (abs(ratio - Scalar1{1}) <= rel_tolerance);
 }
 
 // explicit specialization for doubles
@@ -135,6 +136,12 @@ bool within_tolerance(const std::pair<T1a,T1b>& p1,
             abs_tolerance, rel_tolerance);
 }
 
+// version for complex numbers
+template <>
+bool within_tolerance(const std::complex<double>& c1, const std::complex<double>& c2,
+        double abs_tolerance, double rel_tolerance) {
+    return scalars_within_tolerance(c1, c2, abs_tolerance, rel_tolerance);
+}
 
 
 //
@@ -546,6 +553,51 @@ bit_reverse_copy(const C& c) {
 }
 
 //
+// Utility function to make a type complex
+//
+template <typename T>
+struct make_complex {
+    using type = std::complex<T>;
+};
+template <typename S>
+struct make_complex<std::complex<S>> {
+    using type = std::complex<S>;
+};
+
+//
+// Compute the fast Fourier transform of time series data, zero padding as
+// needed to make the length of the data set a power of two.
+//
+template <typename C,
+         typename T=typename make_complex<typename C::value_type>::type>
+std::vector<T>
+fft(const C& c) {
+    const auto pi = 2 * std::arg(T{0., 1.});
+
+    std::vector<T> result = bit_reverse_copy<C,T>(c);
+
+    size_t n {result.size()};
+    size_t log_2_n;
+    for (log_2_n = 0; (1 << log_2_n) < n; ++log_2_n) {};
+
+    for (int s = 1; s <= log_2_n; ++s) {
+        size_t m {size_t{1} << s};
+        T omega_m = std::polar<typename T::value_type>(1., -2*pi/m);
+        for (size_t k = 0; k < n; k += m) {
+            T omega = 1;
+            for (size_t j = 0; j < m/2; ++j) {
+                T t = omega * result[k + j + m/2];
+                T u = result[k + j];
+                result[k + j] = u + t;
+                result[k + j + m/2] = u - t;
+                omega *= omega_m;
+            }
+        }
+    }
+
+    return std::move(result);
+}
+
 // The main entry point.  For the moment, this just runs self-tests
 //
 
@@ -553,6 +605,8 @@ int main() {
     // define some abbreviations we'll use below
     using V = std::vector<double>;
     using PV = std::pair<V,V>;
+    using C = std::complex<double>;
+    using VC = std::vector<std::complex<double>>;
 
     {
         std::cout << "testing iostream operators...\n";
@@ -661,7 +715,7 @@ int main() {
             cubic_spline_interpolate(V{0.1, 1.2}, V{2.3, 3.5},
                 V{0.0, 0.1, 0.3, 1.2, 1.5}),
             V{2.190909, 2.300000, 2.518182, 3.500000, 3.827273},
-            1e-6, 0.));
+           1e-6, 0.));
         // should use cubic splines for 3 or more datapoints
         // (test data from R "spline" function with method="natural")
         assert(within_tolerance(
@@ -750,6 +804,17 @@ int main() {
         assert(within_tolerance(
             bit_reverse_copy(V{0.1, 0.2, 0.3, 0.4, 0.5, 0.6}),
             V{0.1, 0.5, 0.3, 0.0, 0.2, 0.6, 0.4, 0.0}, 0., 0.));
+    }
+    {
+        std::cout << "testing fft...\n";
+        auto ys = V{1.2, 0.8, 3.4, 3.5, 2.7, -0.1, 0.3, -0.5};
+        // should match results from R
+        assert(within_tolerance(fft(ys), VC{
+            C{11.300000, 0.0000000}, C{-3.692031,-6.5648232},
+            C{ 0.200000, 2.3000000}, C{ 0.692031,-0.3648232},
+            C{ 3.900000, 0.0000000}, C{ 0.692031, 0.3648232},
+            C{ 0.200000,-2.3000000}, C{-3.692031, 6.5648232}},
+            1e-6, 0.));
     }
 
     return 0;
