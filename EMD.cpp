@@ -629,6 +629,29 @@ ifft(const C& c) {
 
 
 //
+// Calculate the analytic representation of a time series (by adding i times
+// the Hilbert transform of the time series).
+//
+template <typename C,
+         typename T=typename make_complex<typename C::value_type>::type>
+std::vector<T>
+analytic_representation(const C& c) {
+    auto ft = fft(c);
+
+    // multiply the positive frequencies by two and zero out the negative
+    // frequencies (leaving the boundary frequencies at 1).
+    for (size_t i = 1; i < ft.size()/2; ++i) {
+        ft[i] *= 2;
+    }
+    for (size_t i = ft.size()/2 + 1; i < ft.size(); ++i) {
+        ft[i] = 0;
+    }
+
+    return ifft(ft);
+}
+
+
+//
 // The main entry point.  For the moment, this just runs self-tests
 //
 
@@ -812,7 +835,6 @@ int main() {
         // improve them.
         for (auto imf : imfs) {
             auto sifted = sift(xs, imf);
-            std::cout << imf << "\n";
             assert(sifted.size() == 0 ||
                 sifting_difference(imf, sifted) <= 0.2);
         }
@@ -864,6 +886,17 @@ int main() {
         std::transform(begin(ys), end(ys), back_inserter(cys),
                 [](std::complex<double> x) { return std::real(x); });
         assert(within_tolerance(ifft(fft(ys)), cys, 1e-15, 0.));
+    }
+    {
+        std::cout << "testing analytic_representation...\n";
+        V input;
+        VC expected;
+        const double pi = 2 * std::atan2(0.,1.);
+        for (int k = 0; k < 1024; ++k) {
+            input.push_back(std::cos(2*pi*k/128));
+            expected.push_back(C{std::cos(2*pi*k/128), std::sin(2*pi*k/128)});
+        }
+        assert(within_tolerance(analytic_representation(input), expected, 1e-15, 0.));
     }
 
     return 0;
