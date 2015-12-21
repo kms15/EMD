@@ -26,6 +26,7 @@
 #include <functional>
 #include <type_traits>
 #include <complex>
+#include <algorithm>
 
 using std::begin;
 using std::end;
@@ -565,13 +566,12 @@ struct make_complex<std::complex<S>> {
 };
 
 //
-// Compute the fast Fourier transform of time series data, zero padding as
-// needed to make the length of the data set a power of two.
+// helper function to perform the common core parts of the fft and ifft
+// (do not call directly).
 //
-template <typename C,
-         typename T=typename make_complex<typename C::value_type>::type>
+template <typename C, typename T, bool inverse>
 std::vector<T>
-fft(const C& c) {
+fft_core(const C& c) {
     const auto pi = 2 * std::arg(T{0., 1.});
 
     std::vector<T> result = bit_reverse_copy<C,T>(c);
@@ -582,7 +582,8 @@ fft(const C& c) {
 
     for (int s = 1; s <= log_2_n; ++s) {
         size_t m {size_t{1} << s};
-        T omega_m = std::polar<typename T::value_type>(1., -2*pi/m);
+        T omega_m = std::polar<typename T::value_type>(1.,
+            (inverse ? 2 : -2)*pi/m);
         for (size_t k = 0; k < n; k += m) {
             T omega = 1;
             for (size_t j = 0; j < m/2; ++j) {
@@ -595,9 +596,40 @@ fft(const C& c) {
         }
     }
 
+    if (inverse) {
+        for (auto& c : result) {
+            c /= n;
+        }
+    }
+
     return std::move(result);
 }
 
+
+//
+// Compute the fast Fourier transform of time series data, zero padding as
+// needed to make the length of the data set a power of two.
+//
+template <typename C,
+         typename T=typename make_complex<typename C::value_type>::type>
+std::vector<T>
+fft(const C& c) {
+    return fft_core<C,T,false>(c);
+}
+
+
+//
+// Compute the inverse fast Fourier transform.
+//
+template <typename C,
+         typename T=typename make_complex<typename C::value_type>::type>
+std::vector<T>
+ifft(const C& c) {
+    return fft_core<C,T,true>(c);
+}
+
+
+//
 // The main entry point.  For the moment, this just runs self-tests
 //
 
@@ -815,6 +847,15 @@ int main() {
             C{ 3.900000, 0.0000000}, C{ 0.692031, 0.3648232},
             C{ 0.200000,-2.3000000}, C{-3.692031, 6.5648232}},
             1e-6, 0.));
+    }
+    {
+        std::cout << "testing ifft...\n";
+        // ifft should reverse the fft
+        auto ys = V{1.2, 0.8, 3.4, 3.5, 2.7, -0.1, 0.3, -0.5};
+        auto cys = VC{};
+        std::transform(begin(ys), end(ys), back_inserter(cys),
+                [](std::complex<double> x) { return std::real(x); });
+        assert(within_tolerance(ifft(fft(ys)), cys, 1e-15, 0.));
     }
 
     return 0;
