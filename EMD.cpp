@@ -913,14 +913,14 @@ int main() {
         std::cout << "testing analytic_representation...\n";
         V input;
         VC expected;
-        const double pi = 2 * std::atan2(0.,1.);
+        const double pi = 2 * std::atan2(1.,0.);
         for (int k = 0; k < 1024; ++k) {
             input.push_back(std::cos(2*pi*k/128));
             expected.push_back(
                 C{std::cos(2*pi*k/128), std::sin(2*pi*k/128)});
         }
         assert(within_tolerance(analytic_representation(input), expected,
-            1e-15, 0.));
+            1e-13, 0.));
     }
     {
         std::cout << "testing derivative...\n";
