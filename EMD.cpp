@@ -735,11 +735,11 @@ instantaneous_frequency_and_amplitude(const Ys& ys) {
     };
 }
 
-//
-// The main entry point.  For the moment, this just runs self-tests
-//
 
-int main() {
+//
+// Run self-tests.  These will fail with asserts (so override assert to th
+//
+void run_self_tests() {
     // define some abbreviations we'll use below
     using V = std::vector<double>;
     using PV = std::pair<V,V>;
@@ -1084,6 +1084,23 @@ int main() {
                 1e-3, 0.));
         }
     }
+}
 
-    return 0;
+
+
+//
+// The main entry point.  For the moment, this just runs self-tests
+//
+
+int main(int argc, char** argv) {
+
+    if (argc == 2 && argv[1] == std::string("--run-tests")) {
+        run_self_tests();
+
+        return 0;
+    } else {
+        std::cerr << "Usage:\n"
+            << "  " << argv[0] << " --run-tests\n";
+        return 1;
+    }
 }

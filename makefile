@@ -27,6 +27,7 @@ clean:
 $(TARGET)_covgen: $(OBJECTS:%.o=%_covgen.o)
 	$(CXX) -o $@ $(LDFLAGS) $(LOADLIBES) $(LDLIBS) \
 		-O0 -fprofile-arcs -ftest-coverage $^
-	./$(TARGET)_covgen
+	! ./$(TARGET)_covgen
+	./$(TARGET)_covgen --run-tests
 
 coverage: $(SOURCES:%=%.gcov)
