@@ -17,6 +17,7 @@
 //    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <iostream>
+#include <fstream>
 #include <iomanip>
 #include <vector>
 #include <limits>
@@ -27,6 +28,7 @@
 #include <type_traits>
 #include <complex>
 #include <algorithm>
+#include <edflib.h>
 
 using std::begin;
 using std::end;
@@ -435,7 +437,7 @@ sifting_difference(const T1& old_vals, const T2& new_vals) {
 //
 template <typename Xs, typename Ys>
 std::vector<std::vector<typename Ys::value_type>>
-empirical_mode_decomposition(const Xs& xs, const Ys& ys) {
+empirical_mode_decomposition(const Xs& xs, const Ys& ys, unsigned max_siftings = 50) {
     using Y_Val = typename Ys::value_type;
     using Imf = std::vector<Y_Val>;
 
@@ -455,11 +457,17 @@ empirical_mode_decomposition(const Xs& xs, const Ys& ys) {
         }
 
         // iterate the sifting process until we reach a stopping condition
+        int num_siftings=0;
         Imf imf {residual};
-        while (sifted.size() > 0 && sifting_difference(imf, sifted) > 0.2) {
+        std::cout << "  computing IMF " << result.size() + 1 << std::flush;
+        while ((max_siftings == 0 || num_siftings < max_siftings) &&
+                sifted.size() > 0 && sifting_difference(imf, sifted) > 0.2) {
+            ++num_siftings;
+            std::cout << "." << std::flush;
             imf = std::move(sifted);
             sifted = sift(xs, imf);
         }
+        std::cout << "\n";
 
         // subtract out the imf from the residual
         for (size_t i = 0; i < residual.size(); ++i) {
@@ -1094,13 +1102,85 @@ void run_self_tests() {
 
 int main(int argc, char** argv) {
 
+    // TODO: use readline library to allow more flexibility in command-line
+    // argument order and combinations.
     if (argc == 2 && argv[1] == std::string("--run-tests")) {
         run_self_tests();
 
         return 0;
+    } else if (argc == 4 && argv[2] == std::string("--generate-spectrum")) {
+        const char* edf_filename = argv[1];
+        const char* spectrum_filename = argv[3];
+
+        // read the edf file
+        edf_hdr_struct edf_header;
+        auto edf = edfopen_file_readonly(edf_filename, &edf_header,
+                EDFLIB_DO_NOT_READ_ANNOTATIONS);
+        std::vector<double> data(edf_header.signalparam[0].smp_in_file);
+        edfread_physical_samples(edf, 0, data.size(), data.data());
+        //data.resize(100000); // uncomment to truncate data for quick tests
+
+        std::vector<double> times;
+        times.reserve(data.size());
+        for (size_t i = 0; i < data.size(); ++i) {
+            times.push_back(edf_header.file_duration * 1e-7 * i / (data.size() - 1));
+        }
+        edfclose_file(edf);
+
+        // take the EMD
+        std::cout << "Computing empirical mode decomposition\n";
+        auto emd = empirical_mode_decomposition(times, data);
+
+        // compute the Hilbert spectrum
+        std::cout << "Computing Hilbert spectrum" << std::flush;
+
+        constexpr size_t x_bin_size = 128; // samples per x bin
+        size_t num_x_bins = (data.size() + (x_bin_size - 1)) / x_bin_size;
+        constexpr size_t num_y_bins = 128;
+        const double max_frequency = 0.5;//1/(2*times[1]); // Nyquist limit
+        const double y_bin_size = max_frequency / num_y_bins;
+
+        std::vector<std::vector<double>> spectrum;
+        spectrum.resize(num_x_bins);
+        for (auto& timeslice : spectrum) {
+            timeslice.resize(num_y_bins);
+        }
+
+        for (const auto& imf : emd) {
+            std::cout << "." << std::flush;
+            auto freq_amp = instantaneous_frequency_and_amplitude(imf);
+
+            for (size_t i = 0; i < data.size(); ++i) {
+                size_t y_bin = std::max(size_t{0}, std::min(num_y_bins - 1,
+                    static_cast<size_t>(freq_amp.first[i] / y_bin_size)));
+                assert(y_bin < num_y_bins);
+                spectrum[i/x_bin_size][y_bin] += freq_amp.second[i];
+            }
+        }
+        std::cout << "\n";
+
+        // save the spectrum as a csv file
+        std::cout << "Saving spectrum\n";
+        std::ofstream spectrum_file{spectrum_filename};
+        for (auto& timeslice : spectrum) {
+            bool first_column = true;
+            for (double val : timeslice) {
+                // write a leading comma for every column except the first
+                if (first_column) {
+                    first_column = false;
+                } else {
+                    spectrum_file << ",";
+                }
+
+                spectrum_file << val;
+            }
+
+            spectrum_file << "\n";
+        }
     } else {
         std::cerr << "Usage:\n"
-            << "  " << argv[0] << " --run-tests\n";
+            << "  " << argv[0] << " --run-tests\n"
+            << "  " << argv[0] << " edffile --generate-spectrum spectrumfile\n";
         return 1;
     }
 }

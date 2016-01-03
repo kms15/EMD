@@ -1,7 +1,9 @@
-CPPFLAGS=--std=c++11 -O2 -Wall -Wpedantic -Werror
+EDFLIBDIR=./lib/edflib_111
+CXXFLAGS=--std=c++11 -O2 -Wall -Wpedantic -Werror -I$(EDFLIBDIR)
 LDFLAGS=-static -O2
 SOURCES=EMD.cpp
-OBJECTS=$(SOURCES:%.cpp=%.o)
+LIBSOURCES=$(EDFLIBDIR)/edflib.c
+OBJECTS=$(SOURCES:%.cpp=%.o) $(LIBSOURCES:%.c=%.o)
 TARGET=EMD
 
 $(TARGET): $(OBJECTS)
@@ -24,7 +26,7 @@ clean:
 %.cpp.gcov : %.cpp $(TARGET)_covgen
 	gcov $< -r -o $(<:%.cpp=%_covgen.o)
 
-$(TARGET)_covgen: $(OBJECTS:%.o=%_covgen.o)
+$(TARGET)_covgen: $(SOURCES:%.cpp=%_covgen.o) $(LIBSOURCES)
 	$(CXX) -o $@ $(LDFLAGS) $(LOADLIBES) $(LDLIBS) \
 		-O0 -fprofile-arcs -ftest-coverage $^
 	! ./$(TARGET)_covgen
