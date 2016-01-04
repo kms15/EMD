@@ -4,3 +4,9 @@ EMD_covgen
 *.gcov
 *.gcda
 *.gcno
+.Rhistory
+.RData
+SC*.edf
+SC*-spectrum.csv
+SC*-hilbert.png
+SC*-spectrogram.png
