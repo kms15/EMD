@@ -1134,9 +1134,9 @@ int main(int argc, char** argv) {
         // compute the Hilbert spectrum
         std::cout << "Computing Hilbert spectrum" << std::flush;
 
-        constexpr size_t x_bin_size = 128; // samples per x bin
+        constexpr size_t x_bin_size = 8192; // samples per x bin
         size_t num_x_bins = (data.size() + (x_bin_size - 1)) / x_bin_size;
-        constexpr size_t num_y_bins = 128;
+        constexpr size_t num_y_bins = 1024;
         const double max_frequency = 0.5;//1/(2*times[1]); // Nyquist limit
         const double y_bin_size = max_frequency / num_y_bins;
 
@@ -1150,11 +1150,54 @@ int main(int argc, char** argv) {
             std::cout << "." << std::flush;
             auto freq_amp = instantaneous_frequency_and_amplitude(imf);
 
-            for (size_t i = 0; i < data.size(); ++i) {
-                size_t y_bin = std::max(size_t{0}, std::min(num_y_bins - 1,
-                    static_cast<size_t>(freq_amp.first[i] / y_bin_size)));
-                assert(y_bin < num_y_bins);
-                spectrum[i/x_bin_size][y_bin] += freq_amp.second[i];
+            for (size_t i = 1; i < data.size(); ++i) {
+                double y_start = freq_amp.first[i-1];
+                double y_end = freq_amp.first[i];
+                double amp_start = freq_amp.second[i-1];
+                double amp_end = freq_amp.second[i];
+                size_t y_bin_start = std::max(size_t{0}, std::min(num_y_bins - 1,
+                    static_cast<size_t>(y_start / y_bin_size)));
+                size_t y_bin_end = std::max(size_t{0}, std::min(num_y_bins - 1,
+                    static_cast<size_t>(y_end / y_bin_size)));
+
+                // easy case: starts and ends in same square
+                if (y_bin_start == y_bin_end) {
+                    spectrum[i/x_bin_size][y_bin_start] += (amp_start + amp_end)/2;
+                } else { // harder case: spans multiple squares
+                    double dy = y_end - y_start;
+                    double length = fabs(y_end - y_start);
+                    double y_bottom = (dy > 0)  ? y_start : y_end;
+                    double y_top    = (dy <= 0) ? y_start : y_end;
+                    double amp_bottom = (dy > 0)  ? amp_start : amp_end;
+                    double amp_top    = (dy <= 0) ? amp_start : amp_end;
+                    size_t y_bin_bottom = (dy > 0)  ? y_bin_start : y_bin_end;
+                    size_t y_bin_top    = (dy <= 0) ? y_bin_start : y_bin_end;
+                    double d_amp = (y_top - y_bottom)/length;
+
+                    // bottom square
+                    double length_bottom = y_bin_size * (y_bin_bottom + 1) -
+                        y_bottom;
+                    double mean_amp_bottom = length_bottom * d_amp/2 +
+                        amp_bottom;
+                    spectrum[i/x_bin_size][y_bin_bottom] +=
+                        mean_amp_bottom * length_bottom/length;
+
+                    // middle squares
+                    for (size_t bin = y_bin_bottom + 1; bin < y_bin_top;
+                            ++bin) {
+                        double mid_length = length_bottom +
+                            (bin - y_bin_bottom - 0.5) * y_bin_size;
+                        double mean_amp = (mid_length * d_amp + amp_bottom);
+                        spectrum[i/x_bin_size][bin] +=
+                            mean_amp * y_bin_size/length;
+                    }
+
+                    // top square
+                    double length_top = y_top - y_bin_size * y_bin_top;
+                    double mean_amp_top = (-length_top * d_amp/2 + amp_top);
+                    spectrum[i/x_bin_size][y_bin_top] +=
+                        mean_amp_top * length_top/length;
+                }
             }
         }
         std::cout << "\n";
