@@ -28,6 +28,8 @@
 #include <type_traits>
 #include <complex>
 #include <algorithm>
+
+// external libraries
 #include <edflib.h>
 
 using std::begin;
@@ -1101,23 +1103,56 @@ void run_self_tests() {
 //
 
 int main(int argc, char** argv) {
+    std::string input_filename;
+    std::string spectrum_filename;
+    bool run_tests {false};
 
-    // TODO: use readline library to allow more flexibility in command-line
-    // argument order and combinations.
-    if (argc == 2 && argv[1] == std::string("--run-tests")) {
+    // parse the command-line arguments
+    for (int i = 1; i < argc; ++i) {
+        if (argv[i] == std::string("--run-tests")) {
+            run_tests = true;
+        } else if (argv[i] == std::string("--generate-spectrum")) {
+            if ((i+1 >= argc) || (argv[i+1][0] == '-')) {
+                std::cerr << "missing output filename for " <<
+                    "--generate-spectrum option\n";
+                return 1;
+            } else if (!spectrum_filename.empty()) {
+                std::cerr << "--generate-spectrum appeared more than once" <<
+                    " on the command line.\n";
+                return 1;
+            } else {
+                spectrum_filename = argv[i+1];
+                ++i; // eat the filename argument
+            }
+        } else if (argv[i][0] == '-') {
+            std::cerr << "unknown option '" << argv[i] << "' specified.\n";
+            return 1;
+        } else if (!input_filename.empty()) {
+            std::cerr << "Multiple input files specified: '" <<
+                input_filename << "' and '" << argv[i] << "'.\n";
+            return 1;
+        } else {
+            input_filename = argv[i];
+        }
+    }
+
+    if (run_tests) {
         run_self_tests();
+    }
 
-        return 0;
-    } else if (argc == 4 && argv[2] == std::string("--generate-spectrum")) {
-        const char* edf_filename = argv[1];
-        const char* spectrum_filename = argv[3];
-
+    if (!spectrum_filename.empty()) {
         // read the edf file
         edf_hdr_struct edf_header;
-        auto edf = edfopen_file_readonly(edf_filename, &edf_header,
-                EDFLIB_DO_NOT_READ_ANNOTATIONS);
+        if (edfopen_file_readonly(input_filename.c_str(), &edf_header,
+                EDFLIB_DO_NOT_READ_ANNOTATIONS) != 0) {
+            std::cerr << "Error opening input file '" << input_filename <<
+                "'.\n";
+            return 1;
+        }
+
         std::vector<double> data(edf_header.signalparam[0].smp_in_file);
-        edfread_physical_samples(edf, 0, data.size(), data.data());
+        edfread_physical_samples(edf_header.handle, 0, data.size(),
+                data.data());
         //data.resize(100000); // uncomment to truncate data for quick tests
 
         std::vector<double> times;
@@ -1125,7 +1160,7 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < data.size(); ++i) {
             times.push_back(edf_header.file_duration * 1e-7 * i / (data.size() - 1));
         }
-        edfclose_file(edf);
+        edfclose_file(edf_header.handle);
 
         // take the EMD
         std::cout << "Computing empirical mode decomposition\n";
@@ -1205,6 +1240,13 @@ int main(int argc, char** argv) {
         // save the spectrum as a csv file
         std::cout << "Saving spectrum\n";
         std::ofstream spectrum_file{spectrum_filename};
+
+        if (!spectrum_file) {
+            std::cerr << "Error creating spectrum file '" <<
+                spectrum_filename << "'.\n";
+            return 1;
+        }
+
         for (auto& timeslice : spectrum) {
             bool first_column = true;
             for (double val : timeslice) {
@@ -1220,10 +1262,14 @@ int main(int argc, char** argv) {
 
             spectrum_file << "\n";
         }
-    } else {
+    }
+
+    if (argc <= 1) {
         std::cerr << "Usage:\n"
             << "  " << argv[0] << " --run-tests\n"
             << "  " << argv[0] << " edffile --generate-spectrum spectrumfile\n";
         return 1;
     }
+
+    return 0;
 }
