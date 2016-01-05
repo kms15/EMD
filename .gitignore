@@ -1,6 +1,7 @@
 *.o
-EMD
-EMD_covgen
+emd
+emd_covgen
+emd_coverage_tests_done
 *.gcov
 *.gcda
 *.gcno
@@ -10,3 +11,6 @@ SC*.edf
 SC*-spectrum.csv
 SC*-hilbert.png
 SC*-spectrogram.png
+bdf_test_generator
+test_generator.bdf
+test_spectrum.csv

@@ -1,10 +1,11 @@
 EDFLIBDIR=./lib/edflib_111
 CXXFLAGS=--std=c++11 -O2 -Wall -Wpedantic -Werror -I$(EDFLIBDIR)
 LDFLAGS=-static -O2
-SOURCES=EMD.cpp
+HEADERS=emd.h
+SOURCES=main.cpp
 LIBSOURCES=$(EDFLIBDIR)/edflib.c
 OBJECTS=$(SOURCES:%.cpp=%.o) $(LIBSOURCES:%.c=%.o)
-TARGET=EMD
+TARGET=emd
 FIGURES=SC4012E0-PSG-hilbert.png SC4012E0-PSG-spectrogram.png
 
 $(TARGET): $(OBJECTS)
@@ -15,8 +16,11 @@ clean:
 		$(TARGET)_covgen \
 		$(OBJECTS:%.o=%_covgen.gcno) $(OBJECTS:%.o=%_covgen.gcda)\
 		$(OBJECTS:%.o=%_covgen.o) $(SOURCES:%=%.gcov)\
+		$(HEADERS:%=%.gcov)\
 		SC*.edf *-spectrum.csv *-hilbert.png *-spectrogram.png\
-		edflib.gcno edflib.gcda
+		edflib.gcno edflib.gcda \
+		bdf_test_generator test_generator.bdf test_spectrum.csa\
+		$(TARGET)_coverage_tests_done
 
 #############################################################################
 # Code coverage
@@ -26,16 +30,41 @@ clean:
 	$(CXX) -o $@ $(CPPFLAGS) $(CXXFLAGS) \
 		-O0 -fprofile-arcs -ftest-coverage -c $^
 
-%.cpp.gcov : %.cpp $(TARGET)_covgen
+%.cpp.gcov : %.cpp $(TARGET)_coverage_tests_done
 	gcov $< -r -o $(<:%.cpp=%_covgen.o)
+
+# runs both unit tests and integration tests to get full coverage
+$(TARGET)_coverage_tests_done : $(TARGET)_covgen test_generator.bdf
+	./$(TARGET)_covgen test_generator.bdf \
+		--generate-spectrum test_spectrum.csv
+	! ./$(TARGET)_covgen # usage
+	! ./$(TARGET)_covgen non-existant-file \
+		--generate-spectrum dummy-spectrum
+	! ./$(TARGET)_covgen --generate-spectrum dummy-spectrum
+	! ./$(TARGET)_covgen test_generator.bdf \
+		--generate-spectrum dummy-spectrum1 \
+		--generate-spectrum dummy-spectrum2
+	! ./$(TARGET)_covgen test_generator.bdf --generate-spectrum
+	! ./$(TARGET)_covgen test_generator.bdf \
+		--generate-spectrum /non-existant-dir/dummy-spectrum
+	! ./$(TARGET)_covgen test_generator.bdf test_generator.bdf \
+		--generate-spectrum test_spectrum.csv
+	! ./$(TARGET)_covgen test_generator.bdf --undefined-option \
+		--generate-spectrum test_spectrum.csv
+	./$(TARGET)_covgen --run-tests
+	touch $@
 
 $(TARGET)_covgen: $(SOURCES:%.cpp=%_covgen.o) $(LIBSOURCES)
 	$(CXX) -o $@ $(LDFLAGS) $(LOADLIBES) $(LDLIBS) \
 		-O0 -fprofile-arcs -ftest-coverage $^
-	! ./$(TARGET)_covgen
-	./$(TARGET)_covgen --run-tests
 
 coverage: $(SOURCES:%=%.gcov)
+
+bdf_test_generator : $(EDFLIBDIR)/test_generator.c $(EDFLIBDIR)/edflib.c
+	$(CXX) -o $@ $(LDFLAGS) $^ $(LOADLIBES) $(LDLIBS) -I$(EDFLIBDIR)
+
+test_generator.bdf : bdf_test_generator
+	./$<
 
 #############################################################################
 # Plots and figures
