@@ -31,6 +31,7 @@
 
 #include "emd.h"
 
+
 // external libraries
 #include <edflib.h>
 
@@ -398,6 +399,11 @@ void run_self_tests() {
         }
         assert(within_tolerance(analytic_representation(input), expected,
             1e-13, 0.));
+
+        // should work for non-power of 2 sizes
+        input.resize(768);
+        expected.resize(768);
+        assert(analytic_representation(input).size() == expected.size());
     }
     {
         std::cout << "testing cyclic difference...\n";
@@ -447,6 +453,19 @@ void run_self_tests() {
                 1e-13, 0.));
             assert(within_tolerance(result.second, expected_amplitude,
                 1e-13, 0.));
+        }
+        // Inputs and outputs should have the same length.
+        {
+            V input;
+            V expected_frequency(1000, 1./128);
+            V expected_amplitude(1000, 2.5);
+
+            for (int k = 0; k < 1000; ++k) {
+                input.push_back(2.5*std::cos(2*pi*k/128));
+            }
+            auto result = instantaneous_frequency_and_amplitude(input);
+            assert(result.first.size() == input.size());
+            assert(result.second.size() == input.size());
         }
         // should capture an exponential decay in amplitude, at least away
         // from the edges.
@@ -577,68 +596,15 @@ int main(int argc, char** argv) {
         constexpr size_t x_bin_size = 8192; // samples per x bin
         size_t num_x_bins = (data.size() + (x_bin_size - 1)) / x_bin_size;
         constexpr size_t num_y_bins = 1024;
-        const double max_frequency = 0.5;//1/(2*times[1]); // Nyquist limit
+        const double max_frequency = 0.5; // Nyquist limit
         const double y_bin_size = max_frequency / num_y_bins;
 
-        std::vector<std::vector<double>> spectrum;
-        spectrum.resize(num_x_bins);
-        for (auto& timeslice : spectrum) {
-            timeslice.resize(num_y_bins);
-        }
+        Binned_spectrum<> spectrum(num_x_bins, num_y_bins, x_bin_size, y_bin_size);
 
         for (const auto& imf : emd) {
             std::cout << "." << std::flush;
             auto freq_amp = instantaneous_frequency_and_amplitude(imf);
-
-            for (size_t i = 1; i < data.size(); ++i) {
-                double y_start = freq_amp.first[i-1];
-                double y_end = freq_amp.first[i];
-                double amp_start = freq_amp.second[i-1];
-                double amp_end = freq_amp.second[i];
-                size_t y_bin_start = std::max(size_t{0}, std::min(num_y_bins - 1,
-                    static_cast<size_t>(y_start / y_bin_size)));
-                size_t y_bin_end = std::max(size_t{0}, std::min(num_y_bins - 1,
-                    static_cast<size_t>(y_end / y_bin_size)));
-
-                // easy case: starts and ends in same square
-                if (y_bin_start == y_bin_end) {
-                    spectrum[i/x_bin_size][y_bin_start] += (amp_start + amp_end)/2;
-                } else { // harder case: spans multiple squares
-                    double dy = y_end - y_start;
-                    double length = fabs(y_end - y_start);
-                    double y_bottom = (dy > 0)  ? y_start : y_end;
-                    double y_top    = (dy <= 0) ? y_start : y_end;
-                    double amp_bottom = (dy > 0)  ? amp_start : amp_end;
-                    double amp_top    = (dy <= 0) ? amp_start : amp_end;
-                    size_t y_bin_bottom = (dy > 0)  ? y_bin_start : y_bin_end;
-                    size_t y_bin_top    = (dy <= 0) ? y_bin_start : y_bin_end;
-                    double d_amp = (y_top - y_bottom)/length;
-
-                    // bottom square
-                    double length_bottom = y_bin_size * (y_bin_bottom + 1) -
-                        y_bottom;
-                    double mean_amp_bottom = length_bottom * d_amp/2 +
-                        amp_bottom;
-                    spectrum[i/x_bin_size][y_bin_bottom] +=
-                        mean_amp_bottom * length_bottom/length;
-
-                    // middle squares
-                    for (size_t bin = y_bin_bottom + 1; bin < y_bin_top;
-                            ++bin) {
-                        double mid_length = length_bottom +
-                            (bin - y_bin_bottom - 0.5) * y_bin_size;
-                        double mean_amp = (mid_length * d_amp + amp_bottom);
-                        spectrum[i/x_bin_size][bin] +=
-                            mean_amp * y_bin_size/length;
-                    }
-
-                    // top square
-                    double length_top = y_top - y_bin_size * y_bin_top;
-                    double mean_amp_top = (-length_top * d_amp/2 + amp_top);
-                    spectrum[i/x_bin_size][y_bin_top] +=
-                        mean_amp_top * length_top/length;
-                }
-            }
+            spectrum.add_trace(freq_amp.first, freq_amp.second);
         }
         std::cout << "\n";
 
@@ -652,21 +618,7 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        for (auto& timeslice : spectrum) {
-            bool first_column = true;
-            for (double val : timeslice) {
-                // write a leading comma for every column except the first
-                if (first_column) {
-                    first_column = false;
-                } else {
-                    spectrum_file << ",";
-                }
-
-                spectrum_file << val;
-            }
-
-            spectrum_file << "\n";
-        }
+        spectrum_file << spectrum;
     }
 
     if (argc <= 1) {

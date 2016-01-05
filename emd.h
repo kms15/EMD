@@ -509,7 +509,10 @@ analytic_representation(const Ys& ys) {
         ws[i] = 0;
     }
 
-    return ifft(ws);
+    auto result = ifft(ws);
+    result.resize(ys.size());
+
+    return std::move(result);
 }
 
 
@@ -599,5 +602,119 @@ instantaneous_frequency_and_amplitude(const Ys& ys) {
 
 
 
+//
+// A 2 dimensional grid of bins with time on the x-axis, frequency on the
+// y-axis, and the bin size proportional to the total amplitude of signals
+// with the given frequency at the given point in time.  This is the Hilbert
+// spectrum as described by Huang et al 1998.
+//
+// The most common use for this would be to generate the grid and add the
+// IMFs from an EMD using their instantaneous frequency and amplitude.  The
+// result is similar to a spectrogram.
+//
+template<typename AmpType=double, typename FreqType=double,
+    typename RatioType=double>
+class Binned_spectrum {
+public:
+    // note: could hide the implementation, but it's not worth the
+    // effort when this class is only used in one place.
+    size_t num_x_bins;
+    size_t num_y_bins;
+    size_t x_bin_size;
+    double y_bin_size;
+    std::vector<std::vector<AmpType>> spectrum;
+
+
+    Binned_spectrum(size_t x_bins, size_t y_bins,
+            size_t points_per_x_bin, FreqType bandwidth_per_y_bin)
+        : num_x_bins(x_bins), num_y_bins(y_bins),
+            x_bin_size(points_per_x_bin), y_bin_size(bandwidth_per_y_bin)
+    {
+        spectrum.resize(num_x_bins);
+        for (auto& timeslice : spectrum) {
+            timeslice.resize(num_y_bins);
+        }
+    }
+
+    // add a given trace to the totals in the various bins.
+    template <typename Frequencies, typename Amplitudes>
+    void add_trace(const Frequencies& frequencies,
+            const Amplitudes& amplitudes) {
+        assert(frequencies.size() == amplitudes.size());
+        assert(frequencies.size() <= num_x_bins * x_bin_size);
+
+        for (size_t i = 1; i < frequencies.size(); ++i) {
+            FreqType y_start = frequencies[i-1];
+            FreqType y_end = frequencies[i];
+            AmpType amp_start = amplitudes[i-1];
+            AmpType amp_end = amplitudes[i];
+            size_t y_bin_start = std::max(size_t{0}, std::min(num_y_bins - 1,
+                static_cast<size_t>(y_start / y_bin_size)));
+            size_t y_bin_end = std::max(size_t{0}, std::min(num_y_bins - 1,
+                static_cast<size_t>(y_end / y_bin_size)));
+
+            // easy case: starts and ends in same square
+            if (y_bin_start == y_bin_end) {
+                spectrum[i/x_bin_size][y_bin_start] += (amp_start + amp_end)/2;
+            } else { // harder case: spans multiple squares
+                FreqType dy = y_end - y_start;
+                FreqType length = fabs(y_end - y_start);
+                FreqType y_bottom = (dy > 0)  ? y_start : y_end;
+                FreqType y_top    = (dy <= 0) ? y_start : y_end;
+                AmpType amp_bottom = (dy > 0)  ? amp_start : amp_end;
+                AmpType amp_top    = (dy <= 0) ? amp_start : amp_end;
+                size_t y_bin_bottom = (dy > 0)  ? y_bin_start : y_bin_end;
+                size_t y_bin_top    = (dy <= 0) ? y_bin_start : y_bin_end;
+                RatioType d_amp = (amp_top - amp_bottom) / RatioType(length);
+
+                // bottom square
+                FreqType length_bottom = y_bin_size * (y_bin_bottom + 1) -
+                    y_bottom;
+                RatioType mean_amp_bottom = length_bottom * d_amp/2 +
+                    amp_bottom;
+                spectrum[i/x_bin_size][y_bin_bottom] +=
+                    AmpType(mean_amp_bottom * length_bottom/length);
+
+                // middle squares
+                for (size_t bin = y_bin_bottom + 1; bin < y_bin_top;
+                        ++bin) {
+                    FreqType mid_length = length_bottom +
+                        (bin - y_bin_bottom) * y_bin_size - y_bin_size/2;
+                    RatioType mean_amp = (mid_length * d_amp + amp_bottom);
+                    spectrum[i/x_bin_size][bin] +=
+                        AmpType(mean_amp * y_bin_size/length);
+                }
+
+                // top square
+                FreqType length_top = y_top - y_bin_size * y_bin_top;
+                AmpType mean_amp_top = (-length_top * d_amp/2 + amp_top);
+                spectrum[i/x_bin_size][y_bin_top] +=
+                    AmpType(mean_amp_top * length_top/length);
+            }
+        }
+    }
+};
+
+template<typename AmpType=double, typename FreqType=double,
+    typename RatioType=double>
+std::ostream& operator << (std::ostream& os,
+        const Binned_spectrum<AmpType,FreqType,RatioType>& spectrum) {
+    for (auto& timeslice : spectrum.spectrum) {
+        bool first_column = true;
+        for (double val : timeslice) {
+            // write a leading comma for every column except the first
+            if (first_column) {
+                first_column = false;
+            } else {
+                os << ",";
+            }
+
+            os << val;
+        }
+
+        os << "\n";
+    }
+    return os;
+}
 
 #endif /* EMD_H */
