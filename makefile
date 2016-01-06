@@ -26,9 +26,12 @@ clean:
 # Code coverage
 #############################################################################
 
-%_covgen.o : %.cpp
+%.o : %.cpp $(HEADERS)
+	$(CXX) -o $@ $(CPPFLAGS) $(CXXFLAGS) $<
+
+%_covgen.o : %.cpp $(HEADERS)
 	$(CXX) -o $@ $(CPPFLAGS) $(CXXFLAGS) \
-		-O0 -fprofile-arcs -ftest-coverage -c $^
+		-O0 -fprofile-arcs -ftest-coverage -c $<
 
 %.cpp.gcov : %.cpp $(TARGET)_coverage_tests_done
 	gcov $< -r -o $(<:%.cpp=%_covgen.o)
