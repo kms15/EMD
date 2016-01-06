@@ -158,6 +158,7 @@ bool within_tolerance(const std::complex<double>& c1, const std::complex<double>
 void run_self_tests() {
     // define some abbreviations we'll use below
     using V = std::vector<double>;
+    using VV = std::vector<std::vector<double>>;
     using PV = std::pair<V,V>;
     using C = std::complex<double>;
     using VC = std::vector<std::complex<double>>;
@@ -518,6 +519,39 @@ void run_self_tests() {
                 1e-3, 0.));
         }
     }
+    {
+        std::cout << "testing Binned_spectrum...\n";
+        Binned_spectrum<> spectrum {6, 4, 2, 200};
+
+        assert(within_tolerance(spectrum.spectrum, VV{
+            { 0., 0., 0., 0.},
+            { 0., 0., 0., 0.},
+            { 0., 0., 0., 0.},
+            { 0., 0., 0., 0.},
+            { 0., 0., 0., 0.},
+            { 0., 0., 0., 0.}
+        }, 1e-6, 0.));
+
+        spectrum.add_trace(V{360, 620, 560, 520}, V{2000, 1000, 3000, 7000});
+
+        std::cout << spectrum.spectrum << "\n" << VV{
+            { 0., 295.857988, 1124.260355, 79.8816568},
+            { 0., 0., 6555.555556, 444.444444},
+            { 0., 0., 0., 0.},
+            { 0., 0., 0., 0.},
+            { 0., 0., 0., 0.},
+            { 0., 0., 0., 0.}} << "\n";
+        assert(within_tolerance(spectrum.spectrum, VV{
+            { 0., 295.857988, 1124.260355, 79.8816568},
+            { 0., 0., 6555.555556, 444.444444},
+            { 0., 0., 0., 0.},
+            { 0., 0., 0., 0.},
+            { 0., 0., 0., 0.},
+            { 0., 0., 0., 0.}
+        }, 1e-6, 0.));
+
+    }
+    std::cout << "\n\nSelf test PASSED!!!!!!!!\n\n";
 }
 
 
