@@ -130,7 +130,7 @@ cubic_spline_interpolate(const Old_Xs& old_xs, const Ys& old_ys,
 
             // calculate the diagonal, off-diagonal, and rhs of the
             // linear system
-            for (int i = 1; i < old_xs.size() - 1; ++i) {
+            for (size_t i = 1; i < old_xs.size() - 1; ++i) {
                 auto dx_m = old_xs[i] - old_xs[i-1];
                 auto dx_p = old_xs[i+1] - old_xs[i];
                 auto dy_m = old_ys[i] - old_ys[i-1];
@@ -146,20 +146,20 @@ cubic_spline_interpolate(const Old_Xs& old_xs, const Ys& old_ys,
             }
 
             // do the forward substitution pass
-            for (int i = 1; i < rhs.size(); ++i) {
+            for (size_t i = 1; i < rhs.size(); ++i) {
                 auto q = off_diag[i-1]/diag[i-1];
                 diag[i] -= q*off_diag[i-1];
                 rhs[i] -= q*rhs[i-1];
             }
 
             // do the backwards substitution
-            for (int i = rhs.size() - 2; i >= 0; --i) {
+            for (size_t i = rhs.size() - 2; i != (size_t(0) - 1); --i) {
                 auto q = off_diag[i]/diag[i+1];
                 rhs[i] -= q*rhs[i+1];
             }
 
             // store the d2ys
-            for (int i = 0; i < rhs.size(); ++i) {
+            for (size_t i = 0; i < rhs.size(); ++i) {
                 d2ys.push_back(rhs[i]/diag[i]);
             }
         }
@@ -249,7 +249,7 @@ sift(const Xs& xs, const Ys& ys) {
     auto lower_envelope = cubic_spline_interpolate(minima.first,
         minima.second, xs);
 
-    for (int i = 0; i < upper_envelope.size(); ++i) {
+    for (size_t i = 0; i < upper_envelope.size(); ++i) {
         result.push_back(ys[i] - (upper_envelope[i] + lower_envelope[i])/2);
     }
 
@@ -311,7 +311,7 @@ empirical_mode_decomposition(const Xs& xs, const Ys& ys, unsigned max_siftings =
         }
 
         // iterate the sifting process until we reach a stopping condition
-        int num_siftings=0;
+        size_t num_siftings=0;
         Imf imf {residual};
         std::cout << "  computing IMF " << result.size() + 1 << std::flush;
         while ((max_siftings == 0 || num_siftings < max_siftings) &&
@@ -384,8 +384,11 @@ T reverse_n_bits(T val, unsigned word_length) {
     }
 
     // ...then adjacent dwords...
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshift-count-overflow"
     u = ((u & static_cast<U>(0xFFFFFFFF00000000ULL)) >> 32) +
         ((u & static_cast<U>(0x00000000FFFFFFFFULL)) << 32);
+#pragma GCC diagnostic pop
 
     return u >> (64 - word_length);
 }
@@ -401,11 +404,11 @@ template <typename C, typename T=typename C::value_type>
 std::vector<T>
 bit_reverse_copy(const C& c) {
     unsigned num_address_bits = 0;
-    while ((1 << num_address_bits) < c.size()) {
+    while ((1U << num_address_bits) < c.size()) {
         ++num_address_bits;
     }
 
-    std::vector<T> result(1 << num_address_bits);
+    std::vector<T> result(1U << num_address_bits);
 
     for (size_t i = 0; i < c.size(); ++i) {
         result[reverse_n_bits(i, num_address_bits)] = c[i];
@@ -439,9 +442,9 @@ fft_core(const C& c) {
 
     size_t n {result.size()};
     size_t log_2_n;
-    for (log_2_n = 0; (1 << log_2_n) < n; ++log_2_n) {};
+    for (log_2_n = 0; (1U << log_2_n) < n; ++log_2_n) {};
 
-    for (int s = 1; s <= log_2_n; ++s) {
+    for (size_t s = 1; s <= log_2_n; ++s) {
         size_t m {size_t{1} << s};
         T omega_m = std::polar<typename T::value_type>(1.,
             (inverse ? 2 : -2)*pi/m);

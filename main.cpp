@@ -393,7 +393,7 @@ void run_self_tests() {
         V input;
         VC expected;
         const double pi = 2 * std::atan2(1.,0.);
-        for (int k = 0; k < 1024; ++k) {
+        for (size_t k = 0; k < 1024; ++k) {
             input.push_back(std::cos(2*pi*k/128));
             expected.push_back(
                 C{std::cos(2*pi*k/128), std::sin(2*pi*k/128)});
@@ -534,13 +534,6 @@ void run_self_tests() {
 
         spectrum.add_trace(V{360, 620, 560, 520}, V{2000, 1000, 3000, 7000});
 
-        std::cout << spectrum.spectrum << "\n" << VV{
-            { 0., 295.857988, 1124.260355, 79.8816568},
-            { 0., 0., 6555.555556, 444.444444},
-            { 0., 0., 0., 0.},
-            { 0., 0., 0., 0.},
-            { 0., 0., 0., 0.},
-            { 0., 0., 0., 0.}} << "\n";
         assert(within_tolerance(spectrum.spectrum, VV{
             { 0., 295.857988, 1124.260355, 79.8816568},
             { 0., 0., 6555.555556, 444.444444},

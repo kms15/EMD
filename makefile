@@ -1,5 +1,5 @@
 EDFLIBDIR=./lib/edflib_111
-CXXFLAGS=--std=c++11 -O2 -Wall -Wpedantic -Werror -I$(EDFLIBDIR)
+CXXFLAGS=-c --std=c++11 -O2 -Wall -Wpedantic -Werror -I$(EDFLIBDIR)
 LDFLAGS=-static -O2
 HEADERS=emd.h
 SOURCES=main.cpp
